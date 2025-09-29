@@ -16,99 +16,89 @@ Compiler: gcc
 
 // Structure used to pass arguments to each thread
 typedef struct {
-	// Thread index (0-based, determines which terms of the series to compute)
-	int threadIndex; 
-	// Total number of threads running
-	int numThreads;
-	// Number of iterations (terms) each thread should compute
-	int numIterations;
-	// Value of x used in ln(x) approximation
-	double x;
+	int threadIndex; // Thread index
+	int numThreads; // number of threads running
+	int numIterations; // Number of iterations per thread
+	double x; // x used in ln(x) approximation
 } THREAD_DATA_TYPE;
 
-// Global accumulator for the series sum (shared by all threads)
-static double g_seriesSum = 0.0;
+// Global variable
+static double globalVariable = 0.0;
 
-// Mutex to protect updates to the shared global sum
-static pthread_mutex_t g_sumMutex;
+// lock variable (mutex)
+static pthread_mutex_t lock;
 
 
-// Thread function: each thread computes its subset of series terms
+// each thread computes its subset of series terms
 static void *thread_function(void *data)
 {
-	THREAD_DATA_TYPE *threadData = (THREAD_DATA_TYPE *)data;
-	const double xMinusOne = threadData->x - 1.0;
+	THREAD_DATA_TYPE *threadData = (THREAD_DATA_TYPE *)data; // cast pointer
+	
+	// Loop through
+	int i;
+	for (i = 0; i < threadData->numIterations; i++) {
+		int n = (threadData->threadIndex + 1) + i * threadData->numThreads; // N starts at i + 1
 
-	// Each thread loops through its assigned terms
-	int k;
-	for (k = 0; k < threadData->numIterations; k++) {
-		// Formula: n = (threadIndex+1) + k*numThreads
-		int n = (threadData->threadIndex + 1) + k * threadData->numThreads; // N starts at thread index + 1
-
-		// Compute magnitude of the nth term: (x-1)^n / n
+		// Compute magnitude of the nth term
+		double xMinusOne = threadData->x - 1.0;
 		double termMagnitude = pow(xMinusOne, (double)n) / (double)n;
 
-		// Alternate sign: odd n => positive, even n => negative
+		//  odd n is positive and even n is negative
 		double term = (n % 2 == 1) ? termMagnitude : -termMagnitude;
 
 		// Lock the mutex before updating the global sum
-		pthread_mutex_lock(&g_sumMutex);
-		g_seriesSum += term;
-		pthread_mutex_unlock(&g_sumMutex);
+		pthread_mutex_lock(&lock);
+		globalVariable += term;
+		pthread_mutex_unlock(&lock);
 	}
 	return NULL;
 }
 
 
-// Main function: parses arguments, creates threads, and prints results
+// Main
 int main(int argc, char *argv[])
 {
-	// Check for proper command-line usage
+	// Check input args
 	if (argc != 4) {
 		fprintf(stderr, "Usage: %s <x in (0,2)> <numThreads> <iterationsPerThread>\n", argv[0]);
 		return 1;
 	}
 
-	// Convert first argument to double (x value)
+	// Ensures input is within (0,2)
 	char *endptr = NULL;
 	double x = strtod(argv[1], &endptr);
 	if (endptr == argv[1] || x <= 0.0 || x >= 2.0) {
-		fprintf(stderr, "Error: x must be a floating-point value in (0,2).\n");
+		fprintf(stderr, "Value must be in (0,2).\n");
 		return 1;
 	}
 
-	// Convert second argument to integer (number of threads)
+	// Ensures inputs are positive to avoid error
 	int numThreads = (int)strtol(argv[2], &endptr, 10);
-	if (endptr == argv[2] || numThreads <= 0) {
-		fprintf(stderr, "Error: numThreads must be a positive integer.\n");
+    int iterationsPerThread = (int)strtol(argv[3], &endptr, 10);
+    if (endptr == argv[2] || numThreads <= 0 || endptr == argv[3] || iterationsPerThread <= 0) {
+        fprintf(stderr, "threads and iterations must be positive integers.\n");
+        return 1;
+    }
+
+	// Initialize the mutex
+	if (pthread_mutex_init(&lock, NULL) != 0) {
+		fprintf(stderr, "Failed to initialize mutex.\n");
 		return 1;
 	}
 
-	// Convert third argument to integer (iterations per thread)
-	int iterationsPerThread = (int)strtol(argv[3], &endptr, 10);
-	if (endptr == argv[3] || iterationsPerThread <= 0) {
-		fprintf(stderr, "Error: iterations must be a positive integer.\n");
-		return 1;
-	}
-
-	// Initialize mutex for synchronizing access to the global sum
-	if (pthread_mutex_init(&g_sumMutex, NULL) != 0) {
-		fprintf(stderr, "Error initializing mutex.\n");
-		return 1;
-	}
-
-	// Allocate arrays for thread handles and thread data
-	pthread_t *threads = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)numThreads);
+	// Table of thread IDs
+	pthread_t *threadID_table = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)numThreads);
+	// Table of values passed to each thread
 	THREAD_DATA_TYPE *threadData = (THREAD_DATA_TYPE *)malloc(sizeof(THREAD_DATA_TYPE) * (size_t)numThreads);
-	if (threads == NULL || threadData == NULL) {
+	if (threadID_table == NULL || threadData == NULL) {
 		fprintf(stderr, "Error: memory allocation failed.\n");
-		pthread_mutex_destroy(&g_sumMutex);
-		free(threads);
+		pthread_mutex_destroy(&lock);
+		free(threadID_table);
 		free(threadData);
 		return 1;
 	}
 
-	// Create threads and assign work
+	// Create and start up each thread
 	int i;
 	for (i = 0; i < numThreads; i++) {
 		threadData[i].threadIndex = i;
@@ -116,17 +106,17 @@ int main(int argc, char *argv[])
 		threadData[i].numIterations = iterationsPerThread;
 		threadData[i].x = x;
 
-		// Start thread with its corresponding data
-		int rc = pthread_create(&threads[i], NULL, thread_function, (void *)&threadData[i]);
-		if (rc != 0) {
+		// Create the thread and pass in the data
+		int thread_create_status = pthread_create(&threadID_table[i], NULL, thread_function, (void *)&threadData[i]);
+		if (thread_create_status != 0) {
 			fprintf(stderr, "Error: pthread_create failed for thread %d.\n", i);
-			// If thread creation fails, attempt to join previously created threads
+			//  If thread creation fails join previously created threads
 			int j;
 			for (j = 0; j < i; j++) {
-				pthread_join(threads[j], NULL);
+				pthread_join(threadID_table[j], NULL);
 			}
-			pthread_mutex_destroy(&g_sumMutex);
-			free(threads);
+			pthread_mutex_destroy(&lock);
+			free(threadID_table);
 			free(threadData);
 			return 1;
 		}
@@ -134,18 +124,18 @@ int main(int argc, char *argv[])
 
 	// Wait for all threads to complete
 	for (i = 0; i < numThreads; i++) {
-		pthread_join(threads[i], NULL);
+		pthread_join(threadID_table[i], NULL);
 	}
 
-	// Free dynamically allocated memory
-	free(threads);
+	// Free allocated memory
+	free(threadID_table);
 	free(threadData);
 
-	// Print the results: approximation and actual ln(x) with 14 digits precision
-	printf("%.14f\n", g_seriesSum);
+	// Print results
+	printf("%.14f\n", globalVariable);
 	printf("%.14f\n", log(x));
 
 	// Clean up the mutex
-	pthread_mutex_destroy(&g_sumMutex);
+	pthread_mutex_destroy(&lock);
 	return 0;
 }
