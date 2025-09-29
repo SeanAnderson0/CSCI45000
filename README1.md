@@ -1,22 +1,3 @@
-Conversation opened. 1 unread message.
-
-Skip to content
-Using Gmail with screen readers
-Enable desktop notifications for Gmail.
-   OK  No thanks
-1 of 2,996
-Test Code
-Inbox
-
-Drake Schlautman
-Attachments
-5:28 PM (2 minutes ago)
-to me
-
-
- One attachment
-  •  Scanned by Gmail
-0
 /** ***********************************************************************
 	@file	Program1.c
 	@author	Drake Schlautman
@@ -153,5 +134,3 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
-Program1.c
-Displaying Program1.c.
