@@ -1,0 +1,10 @@
+: > results_50.txt
+for a in {0..50..5}; do
+  for b in $(seq 0 5 $((50-a))); do
+    for c in $(seq 0 5 $((50-a-b))); do
+      d=$((50-a-b-c))
+      printf "%2d %2d %2d %2d  ->  " $a $b $c $d | tee -a results_50.txt
+      ./vvm_sim V2-Official-Test-data.txt $a $b $c $d | tee -a results_50.txt
+    done
+  done
+done
