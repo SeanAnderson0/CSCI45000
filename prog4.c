@@ -4,10 +4,10 @@ Author: Sean Anderson
 Date:   November 29, 2025
 Brief:  Simulates disk arm movement using FIFO, SSTF, or C-SCAN.
         Reads cylinder requests from a file, keeps a fixed-size queue,
-        and calculates the average time each request spends waiting.
-        Uses the seek + latency costs from the assignment.
+        and calculates the average time each request waits. Uses the
+        seek + latency costs given in the assignment.
 
-Compile by: gcc -Wall prog4.c -o disk_sim
+Compile by: gcc -Wall prog4.c -o prog4
 ***********************************************************************/
 
 #include <stdio.h>
@@ -20,10 +20,10 @@ Compile by: gcc -Wall prog4.c -o disk_sim
 #define DIST_COST  0.15    // ms per cylinder
 #define LATENCY    4.2     // rotational latency
 
-// simple request node
+// request node for the queue
 typedef struct {
-    int cyl;        // cylinder #
-    double wait;    // accumulated wait time
+    int cyl;        // cylinder
+    double wait;    // total wait time
 } req_t;
 
 // supported algorithms
@@ -33,19 +33,19 @@ typedef enum {
     ALG_CSCAN
 } alg_t;
 
-// basic usage message
+// usage info
 static void usage(const char *p) {
     fprintf(stderr,
         "Usage: %s <algorithm> <queue_size> <input_file>\n"
         "  FIFO | SSTF | CSCAN\n", p);
 }
 
-// return algorithm enum or -1
+// parse algorithm string
 static int parse_algorithm(const char *s) {
     char b[16];
     size_t i;
 
-    // uppercase the string
+    // uppercase the input
     for (i = 0; i < sizeof(b) - 1 && s[i]; ++i)
         b[i] = (char)toupper((unsigned char)s[i]);
     b[i] = '\0';
@@ -56,22 +56,22 @@ static int parse_algorithm(const char *s) {
     return -1;
 }
 
-// compute movement time from one cylinder to another
+// compute movement time
 static double seek_time_ms(int from, int to) {
     if (from == to)
-        return LATENCY;  // special case: no movement, latency only
+        return LATENCY; // no movement, just latency
 
     int d = abs(to - from);
     return START_STOP + (double)d * DIST_COST + LATENCY;
 }
 
-// FIFO: always take index 0
+// FIFO: first request in queue
 static int pick_fifo(req_t *q, int count, int cur) {
     (void)q; (void)count; (void)cur;
     return 0;
 }
 
-// SSTF: shortest seek from current position
+// SSTF: shortest seek
 static int pick_sstf(req_t *q, int count, int cur) {
     int idx = 0;
     int best = abs(q[0].cyl - cur);
@@ -86,7 +86,7 @@ static int pick_sstf(req_t *q, int count, int cur) {
     return idx;
 }
 
-// C-SCAN: pick smallest cylinder >= current; else wrap
+// C-SCAN: pick smallest cylinder >= current, else wrap
 static int pick_cscan(req_t *q, int count, int cur) {
     int up_idx = -1;
     int up_delta = 0;
@@ -96,12 +96,14 @@ static int pick_cscan(req_t *q, int count, int cur) {
     for (int i = 0; i < count; ++i) {
         int c = q[i].cyl;
 
-        if (c < min_c) {   // track global minimum
+        // track global min
+        if (c < min_c) {
             min_c = c;
             min_idx = i;
         }
 
-        if (c >= cur) {    // cylinder in the upward direction
+        // upward direction choice
+        if (c >= cur) {
             int d = c - cur;
             if (up_idx == -1 || d < up_delta) {
                 up_idx = i;
@@ -113,7 +115,7 @@ static int pick_cscan(req_t *q, int count, int cur) {
     return (up_idx != -1) ? up_idx : min_idx;
 }
 
-// choose next request index
+// choose request index
 static int pick_index(alg_t a, req_t *q, int n, int cur) {
     switch (a) {
         case ALG_FIFO:  return pick_fifo(q, n, cur);
@@ -145,14 +147,14 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // open input file
+    // open file
     FILE *fp = fopen(argv[3], "r");
     if (!fp) {
         perror("fopen");
         return 1;
     }
 
-    // allocate queue
+    // queue allocation
     req_t *queue = malloc((size_t)qsize * sizeof(req_t));
     if (!queue) {
         perror("malloc");
@@ -160,7 +162,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    int current = 0;       // disk arm starts at cyl 0
+    int current = 0;    // disk arm starts at cyl 0
     int qcount = 0;
     long processed = 0;
 
@@ -172,25 +174,26 @@ int main(int argc, char *argv[]) {
         ++qcount;
     }
 
-    double total = 0.0;    // sum of all completion times
+    double total = 0.0; // sum of all finished wait times
 
-    // main simulation
+    // run until queue is empty
     while (qcount > 0) {
 
         // choose next request
         int idx = pick_index(alg, queue, qcount, current);
         int target = queue[idx].cyl;
 
-        // time to move
+        // compute movement time
         double step = seek_time_ms(current, target);
 
-        // everyone waits this long
+        // all requests wait this long
         for (int i = 0; i < qcount; ++i)
             queue[i].wait += step;
 
-        // complete chosen request
+        // complete request
         double done = queue[idx].wait;
 
+        // shift queue
         for (int i = idx + 1; i < qcount; ++i)
             queue[i - 1] = queue[i];
 
@@ -218,7 +221,7 @@ int main(int argc, char *argv[]) {
 
     printf("Algorithm: %s  Queue: %d  File: %s\n", name, qsize, argv[3]);
     printf("Processed: %ld\n", processed);
-    printf("Average delay: %.3f ms\n", avg);
+    printf("Average delay: %.2f ms\n", avg); // updated to 2 decimals
 
     free(queue);
     return 0;
